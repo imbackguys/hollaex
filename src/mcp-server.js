@@ -156,7 +156,7 @@ async function startStdio() {
 }
 
 function createHttpApp() {
-  const app = createMcpExpressApp();
+  const app = createMcpExpressApp({ host: '0.0.0.0' });
 
   const mcpPaths = ['/mcp', '/api/mcp'];
 
