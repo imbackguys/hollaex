@@ -162,14 +162,6 @@ function createHttpApp() {
 
   const handler = async (req, res) => {
     try {
-      if (process.env.MCP_SHARED_SECRET) {
-        const token = req.headers.authorization;
-        const expected = `Bearer ${process.env.MCP_SHARED_SECRET}`;
-        if (!token || token !== expected) {
-          return res.status(401).json({ error: 'Unauthorized' });
-        }
-      }
-
       const server = buildServer();
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
@@ -194,6 +186,10 @@ function createHttpApp() {
 
   mcpPaths.forEach((path) => {
     app.post(path, handler);
+    app.options(path, (_req, res) => res.status(200).json({ ok: true }));
+    app.get(path, (_req, res) =>
+      res.status(200).json({ ok: true, message: 'POST MCP requests here' })
+    );
   });
 
   const healthPaths = ['/health', '/api/mcp/health'];

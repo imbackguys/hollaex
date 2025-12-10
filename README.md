@@ -31,7 +31,6 @@ Optional env vars:
 
 ## Deploy to Vercel (HTTP)
 - Files already include `api/mcp.js` for a Vercel serverless function.
-- Required env vars on Vercel: `HOLLAEX_API_KEY`, `HOLLAEX_API_SECRET`, `MCP_SHARED_SECRET` (used for Bearer auth).
+- Required env vars on Vercel: `HOLLAEX_API_KEY`, `HOLLAEX_API_SECRET`.
 - MCP endpoint: `https://<your-vercel-app>.vercel.app/api/mcp`
-- Callers must send header: `Authorization: Bearer <MCP_SHARED_SECRET>`
 - Health check: `https://<your-vercel-app>.vercel.app/api/mcp/health` (also `/health`)
