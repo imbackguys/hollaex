@@ -1,0 +1,18 @@
+{
+  "name": "hollaex",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/mcp-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.24.3",
+    "hollaex-node-lib": "^2.19.4",
+    "zod": "^4.1.13"
+  }
+}
