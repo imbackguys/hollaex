@@ -23,6 +23,9 @@ Tools (with titles, descriptions, and schemas exposed to MCP clients):
 - `placeOrder` — title: “Place Order”  
   - Input: `symbol` (string, e.g. `btc-usdt`), `side` (`buy`/`sell`), `size` (number), `type` (`limit`/`market`, default `limit`), `price` (number, required for limit)  
   - Output: structured order object (id, symbol, side, size, type, price, status, filled, timestamps, fee fields, etc.)
+- `cancelOrder` — title: “Cancel Order”  
+  - Input: `orderId` (string)  
+  - Output: structured cancel result (order id/status/message)
 
 Optional env vars:
 - `HOLLAEX_API_URL` (default `https://api.hollaex.com`)

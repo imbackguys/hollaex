@@ -86,6 +86,15 @@ function buildServer() {
     })
     .passthrough();
 
+  const cancelOutputSchema = z
+    .object({
+      id: z.string().optional(),
+      order_id: z.string().optional(),
+      message: z.string().optional(),
+      status: z.string().optional(),
+    })
+    .passthrough();
+
   server.registerTool(
     'placeOrder',
     {
@@ -140,6 +149,37 @@ function buildServer() {
         };
       } catch (err) {
         console.error('placeOrder error', err);
+        throw err;
+      }
+    }
+  );
+
+  server.registerTool(
+    'cancelOrder',
+    {
+      title: 'Cancel Order',
+      description: 'Cancel an existing order by order ID.',
+      inputSchema: z.object({
+        orderId: z.string().describe('Order ID to cancel'),
+      }),
+      outputSchema: cancelOutputSchema,
+    },
+    async ({ orderId }) => {
+      try {
+        console.error(`cancelOrder called: ${orderId}`);
+        const client = makeClient();
+        const result = await client.cancelOrder(orderId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Canceled order ${orderId}`,
+            },
+          ],
+          structuredContent: result,
+        };
+      } catch (err) {
+        console.error('cancelOrder error', err);
         throw err;
       }
     }
