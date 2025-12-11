@@ -30,7 +30,7 @@ function makeClient() {
   });
 }
 
-const genericOutputSchema = z.unknown();
+const genericOutputSchema = z.object({}).passthrough();
 
 const formatResponse = (message, structuredContent) => ({
   content: [{ type: 'text', text: message }],
@@ -440,12 +440,16 @@ function buildServer() {
           .optional()
           .describe('ISO8601 end date filter'),
       }),
-      outputSchema: z.array(orderOutputSchema).or(genericOutputSchema),
+      outputSchema: z
+        .object({
+          orders: z.array(orderOutputSchema),
+        })
+        .passthrough(),
     },
     async (filters) => {
       const client = makeClient();
       const orders = await client.getOrders(filters);
-      return formatResponse('Fetched orders.', orders);
+      return formatResponse('Fetched orders.', { orders });
     }
   );
 
@@ -460,12 +464,19 @@ function buildServer() {
           .string()
           .describe('Trading pair symbol to cancel orders for, e.g. xht-usdt'),
       }),
-      outputSchema: genericOutputSchema,
+      outputSchema: z
+        .object({
+          orders: z.array(orderOutputSchema).optional(),
+        })
+        .passthrough(),
     },
     async ({ symbol }) => {
       const client = makeClient();
       const result = await client.cancelAllOrders(symbol);
-      return formatResponse(`Canceled all orders for ${symbol}.`, result);
+      return formatResponse(`Canceled all orders for ${symbol}.`, {
+        orders: Array.isArray(result) ? result : [],
+        raw: result,
+      });
     }
   );
 
