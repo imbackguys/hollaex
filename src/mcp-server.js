@@ -1,5 +1,5 @@
-// Simple MCP server exposing one tool: getUserBalance
-// Uses hollaex-node-lib and MCP stdio transport.
+// MCP server exposing HollaEx trading tools.
+// Uses hollaex-node-lib and MCP stdio/HTTP transport.
 
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
@@ -30,6 +30,13 @@ function makeClient() {
   });
 }
 
+const genericOutputSchema = z.unknown();
+
+const formatResponse = (message, structuredContent) => ({
+  content: [{ type: 'text', text: message }],
+  structuredContent,
+});
+
 function buildServer() {
   const server = new McpServer({
     name: 'hollaex-trading-mcp',
@@ -51,15 +58,22 @@ function buildServer() {
     async () => {
       const client = makeClient();
       const balances = await client.getBalance();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'Fetched user balances.',
-          },
-        ],
-        structuredContent: balances,
-      };
+      return formatResponse('Fetched user balances.', balances);
+    }
+  );
+
+  server.registerTool(
+    'getBalance',
+    {
+      title: 'Get User Balance',
+      description: 'Return the authenticated user balances from HollaEx.',
+      inputSchema: z.object({}),
+      outputSchema: balanceOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const balances = await client.getBalance();
+      return formatResponse('Fetched user balances.', balances);
     }
   );
 
@@ -99,7 +113,8 @@ function buildServer() {
     'placeOrder',
     {
       title: 'Place Order',
-      description: 'Place a user order on HollaEx (limit or market).',
+      description:
+        'Place a user order on HollaEx. Set type to market (no price) or limit (requires price).',
       inputSchema: z.object({
         symbol: z
           .string()
@@ -111,17 +126,25 @@ function buildServer() {
           .describe('Order size (base currency amount)'),
         type: z
           .enum(['limit', 'market'])
-          .default('limit')
-          .describe('Order type'),
+          .describe('Order type (must choose market or limit)'),
         price: z
           .number()
           .positive()
           .optional()
           .describe('Required for limit orders; ignored for market orders'),
+        stop: z.number().positive().optional().describe('Optional stop price'),
+        meta: z
+          .object({
+            post_only: z.boolean().optional(),
+            note: z.string().optional(),
+          })
+          .passthrough()
+          .optional()
+          .describe('Optional meta configuration'),
       }),
       outputSchema: orderOutputSchema,
     },
-    async ({ symbol, side, size, type, price }) => {
+    async ({ symbol, side, size, type, price, stop, meta }) => {
       try {
         console.error(
           `placeOrder called: ${symbol} ${side} ${size} ${type} ${price ?? ''}`
@@ -130,23 +153,24 @@ function buildServer() {
           throw new Error('price is required for limit orders');
         }
         const client = makeClient();
+        const priceToSend = type === 'limit' ? price : 0;
+        const opts = {};
+        if (stop !== undefined) {
+          opts.stop = stop;
+        }
+        if (meta) {
+          opts.meta = meta;
+        }
         const order = await client.createOrder(
           symbol,
           side,
           size,
           type,
-          type === 'limit' ? price : undefined
+          priceToSend,
+          Object.keys(opts).length ? opts : undefined
         );
         console.error(`placeOrder success id=${order.id}`);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Placed order ${order.id}`,
-            },
-          ],
-          structuredContent: order,
-        };
+        return formatResponse(`Placed order ${order.id}`, order);
       } catch (err) {
         console.error('placeOrder error', err);
         throw err;
@@ -169,19 +193,369 @@ function buildServer() {
         console.error(`cancelOrder called: ${orderId}`);
         const client = makeClient();
         const result = await client.cancelOrder(orderId);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Canceled order ${orderId}`,
-            },
-          ],
-          structuredContent: result,
-        };
+        return formatResponse(`Canceled order ${orderId}`, result);
       } catch (err) {
         console.error('cancelOrder error', err);
         throw err;
       }
+    }
+  );
+
+  server.registerTool(
+    'getKit',
+    {
+      title: 'Get Kit',
+      description: 'Get exchange information (name, languages, description).',
+      inputSchema: z.object({}),
+      outputSchema: genericOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const kit = await client.getKit();
+      return formatResponse('Fetched kit information.', kit);
+    }
+  );
+
+  server.registerTool(
+    'getConstants',
+    {
+      title: 'Get Constants',
+      description:
+        'Retrieve tick size, min/max price, min/max size of each symbol pair and coin.',
+      inputSchema: z.object({}),
+      outputSchema: genericOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const constants = await client.getConstants();
+      return formatResponse('Fetched constants.', constants);
+    }
+  );
+
+  server.registerTool(
+    'getTicker',
+    {
+      title: 'Get Ticker',
+      description: 'Retrieve 24h ticker data for a specific symbol.',
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .describe('Trading pair symbol, e.g. xht-usdt or btc-usdt'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ symbol }) => {
+      const client = makeClient();
+      const ticker = await client.getTicker(symbol);
+      return formatResponse(`Fetched ticker for ${symbol}.`, ticker);
+    }
+  );
+
+  server.registerTool(
+    'getTickers',
+    {
+      title: 'Get Tickers',
+      description: 'Retrieve 24h ticker data for all symbols.',
+      inputSchema: z.object({}),
+      outputSchema: genericOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const tickers = await client.getTickers();
+      return formatResponse('Fetched tickers for all symbols.', tickers);
+    }
+  );
+
+  server.registerTool(
+    'getOrderbook',
+    {
+      title: 'Get Orderbook',
+      description: 'Retrieve orderbook for a symbol.',
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .describe('Trading pair symbol, e.g. xht-usdt or btc-usdt'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ symbol }) => {
+      const client = makeClient();
+      const orderbook = await client.getOrderbook(symbol);
+      return formatResponse(`Fetched orderbook for ${symbol}.`, orderbook);
+    }
+  );
+
+  server.registerTool(
+    'getOrderbooks',
+    {
+      title: 'Get Orderbooks',
+      description: 'Retrieve orderbooks for all symbols.',
+      inputSchema: z.object({}),
+      outputSchema: genericOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const orderbooks = await client.getOrderbooks();
+      return formatResponse('Fetched orderbooks.', orderbooks);
+    }
+  );
+
+  server.registerTool(
+    'getTrades',
+    {
+      title: 'Get Trades',
+      description: 'Retrieve recent trades; optionally filter by symbol.',
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .optional()
+          .describe('Optional trading pair symbol, e.g. xht-usdt'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ symbol }) => {
+      const client = makeClient();
+      const trades = await client.getTrades({ symbol });
+      return formatResponse(
+        `Fetched recent trades${symbol ? ` for ${symbol}` : ''}.`,
+        trades
+      );
+    }
+  );
+
+  server.registerTool(
+    'getUser',
+    {
+      title: 'Get User',
+      description: "Retrieve the authenticated user's profile information.",
+      inputSchema: z.object({}),
+      outputSchema: genericOutputSchema,
+    },
+    async () => {
+      const client = makeClient();
+      const user = await client.getUser();
+      return formatResponse('Fetched user profile.', user);
+    }
+  );
+
+  server.registerTool(
+    'getUserTrades',
+    {
+      title: 'Get User Trades',
+      description: "Retrieve the user's trade history.",
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .optional()
+          .describe('Optional trading pair symbol, e.g. xht-usdt'),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(50)
+          .optional()
+          .describe('Trades per page (max 50)'),
+        page: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Page number (default 1)'),
+        orderBy: z.string().optional().describe('Field to order by'),
+        order: z.enum(['asc', 'desc']).optional().describe('Sort direction'),
+        startDate: z
+          .string()
+          .optional()
+          .describe('ISO8601 start date filter'),
+        endDate: z
+          .string()
+          .optional()
+          .describe('ISO8601 end date filter'),
+        format: z
+          .enum(['all', 'csv'])
+          .optional()
+          .describe('Response format'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async (filters) => {
+      const client = makeClient();
+      const trades = await client.getUserTrades(filters);
+      return formatResponse('Fetched user trades.', trades);
+    }
+  );
+
+  server.registerTool(
+    'getOrder',
+    {
+      title: 'Get Order',
+      description: 'Retrieve a specific order by ID.',
+      inputSchema: z.object({
+        orderId: z.string().describe('HollaEx Network order ID'),
+      }),
+      outputSchema: orderOutputSchema,
+    },
+    async ({ orderId }) => {
+      const client = makeClient();
+      const order = await client.getOrder(orderId);
+      return formatResponse(`Fetched order ${orderId}.`, order);
+    }
+  );
+
+  server.registerTool(
+    'getOrders',
+    {
+      title: 'Get Orders',
+      description:
+        'Retrieve the list of user orders with optional filters (symbol, side, status).',
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .optional()
+          .describe('Optional trading pair symbol, e.g. xht-usdt'),
+        side: z.enum(['buy', 'sell']).optional().describe('Order side filter'),
+        status: z.string().optional().describe('Order status filter'),
+        open: z.boolean().optional().describe('Filter by open orders'),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(50)
+          .optional()
+          .describe('Orders per page (max 50)'),
+        page: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Page number (default 1)'),
+        orderBy: z.string().optional().describe('Field to order by'),
+        order: z.enum(['asc', 'desc']).optional().describe('Sort direction'),
+        startDate: z
+          .string()
+          .optional()
+          .describe('ISO8601 start date filter'),
+        endDate: z
+          .string()
+          .optional()
+          .describe('ISO8601 end date filter'),
+      }),
+      outputSchema: z.array(orderOutputSchema).or(genericOutputSchema),
+    },
+    async (filters) => {
+      const client = makeClient();
+      const orders = await client.getOrders(filters);
+      return formatResponse('Fetched orders.', orders);
+    }
+  );
+
+  server.registerTool(
+    'cancelAllOrders',
+    {
+      title: 'Cancel All Orders',
+      description:
+        'Cancel all active orders for a specific trading pair symbol.',
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .describe('Trading pair symbol to cancel orders for, e.g. xht-usdt'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ symbol }) => {
+      const client = makeClient();
+      const result = await client.cancelAllOrders(symbol);
+      return formatResponse(`Canceled all orders for ${symbol}.`, result);
+    }
+  );
+
+  server.registerTool(
+    'getMiniCharts',
+    {
+      title: 'Get Mini Charts',
+      description: 'Get trade history HOLCV for provided assets.',
+      inputSchema: z.object({
+        assets: z
+          .array(z.string())
+          .nonempty()
+          .describe('List of asset symbols to fetch, e.g. ["xht", "btc"]'),
+        from: z.string().optional().describe('ISO8601 start date'),
+        to: z.string().optional().describe('ISO8601 end date'),
+        quote: z
+          .string()
+          .optional()
+          .describe('Optional quote asset to price against'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ assets, from, to, quote }) => {
+      const client = makeClient();
+      const result = await client.getMiniCharts(assets, {
+        from,
+        to,
+        quote,
+        assets,
+      });
+      return formatResponse('Fetched mini charts.', result);
+    }
+  );
+
+  server.registerTool(
+    'getQuickTradeQuote',
+    {
+      title: 'Get Quick Trade Quote',
+      description: 'Get a quick trade quote between two currencies.',
+      inputSchema: z.object({
+        spending_currency: z
+          .string()
+          .describe('Currency symbol of the spending currency'),
+        receiving_currency: z
+          .string()
+          .describe('Currency symbol of the receiving currency'),
+        spending_amount: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe('Optional spending amount; provide this or receiving_amount'),
+        receiving_amount: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe('Optional receiving amount; provide this or spending_amount'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({
+      spending_currency,
+      receiving_currency,
+      spending_amount,
+      receiving_amount,
+    }) => {
+      const client = makeClient();
+      const result = await client.getQuickTradeQuote(
+        spending_currency,
+        receiving_currency,
+        {
+          spending_amount,
+          receiving_amount,
+        }
+      );
+      return formatResponse('Fetched quick trade quote.', result);
+    }
+  );
+
+  server.registerTool(
+    'executeOrder',
+    {
+      title: 'Execute Order',
+      description: 'Execute a pre-created order using its token.',
+      inputSchema: z.object({
+        token: z.string().describe('Order execution token'),
+      }),
+      outputSchema: genericOutputSchema,
+    },
+    async ({ token }) => {
+      const client = makeClient();
+      const result = await client.executeOrder(token);
+      return formatResponse('Executed order.', result);
     }
   );
 
